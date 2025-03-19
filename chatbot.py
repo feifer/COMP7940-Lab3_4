@@ -1,66 +1,107 @@
-from telegram import Update
-from telegram.ext import (Updater, CommandHandler, MessageHandler, Filters, CallbackContext)
-import configparser 
+#i think here in this case i donnot use the tools of telegram directly
+#import telegram
+from telegram import update, Update
+#telegram.ext is a submodule of telegram
+from telegram.ext import Updater, MessageHandler, Filters, CommandHandler, CallbackContext
+import configparser
+#a python standard lib for log
 import logging
 import redis
+#update chatbot with chatgpt api
+from ChatGPT_HKBU import HKBU_ChatGPT
 
-global redis1 
+#global variable redis1
+global redis1
+
 def main():
-    # Load your token and create an Updater for your Bot
-    config = configparser.ConfigParser() 
-    config.read('config.in i')
-    updater = Updater(token=(config['TELEGRAM']['ACCESS_TOKEN ']), use_context=True) 
-    dispatcher = updater.dispatcher
+    config=configparser.ConfigParser()
+    config.read('config.ini')
+#Updater : continuously fetch new updates from telegram and pass them on to Dispatcher class
+#create an instance of Updater class
+#use_context=True : my handler will recieve the Context object as a argument
+    updater=Updater(token=(config['TELEGRAM']['ACCESS_TOKEN']),use_context=True)
+    dispatcher=updater.dispatcher
+
     global redis1
-    redis1 = redis.Redis(host=(config['REDIS ']['HOST ']),
-        password=(config['REDIS ']['PASSWORD ']),
-        port=(config['REDIS ']['REDISPORT ']),
-        decode_responses=(config['REDIS ']['DECODE_RESPONSE ']), 
-        username=(config['REDIS ']['USER_NAME ']))
+#create an instance of Redis
+    redis1=redis.Redis(host=(config['REDIS']['HOST']),
+                       password=(config['REDIS']['PASSWORD']),
+                       port=(config['REDIS']['REDISPORT']),
+                       decode_responses=(config['REDIS']['DECODE_RESPONSE']),
+                       username=(config['REDIS']['USER_NAME']))
 
-    # You can set this logging module, so you will know when
-    # and why things do not work as expected Meanwhile, update your config.in i as:
-    logging.basicConfig(format='%(asctime)s - %(name)s - %(level name)s - %(message)s ', level=logging.INFO)
+#config the format or others for the output log
+    logging.basicConfig(level=logging.INFO,format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-    # register a dispatcher to handle message: here we register an echo dispatcher
-    echo_handler = MessageHandler(Filters.text & (~Filters.command), echo) 
-    dispatcher.add_handler(echo_handler)
+#diapater for echo function
+#Filters.text is a filter,~Filters.command is a deny filter to exclude commands text,
+# here combine these 2 filters
+#echo is a callback function (i defined it) to deal with the messages
+    #echo_handler=MessageHandler(Filters.text & (~Filters.command),echo)
+    #dispatcher.add_handler(echo_handler)
 
-    # on different commands - answer in Telegram
-    dispatcher.add_handler(CommandHandler("add", add))
-    dispatcher.add_handler(CommandHandler("help", help_command))
+#dispater for chatgpt
+    global chatgpt
+    chatgpt=HKBU_ChatGPT(config)
+    chatgpt_handler=MessageHandler(Filters.text & (~Filters.command),equiped_chatgpt)
+    dispatcher.add_handler(chatgpt_handler)
 
-    # To start the bot:
-    updater.start_polling() 
+#dispatchers for self defined cmd
+    dispatcher.add_handler(CommandHandler("add",add))
+    dispatcher.add_handler(CommandHandler("help",help_command))
+    dispatcher.add_handler(CommandHandler("hello",hello_name))
+    
+#start chatbot
+    updater.start_polling()
     updater.idle()
 
-def echo(update, context):
-    reply_message = update.message.text.upper() 
+#use ChatGPT API
+def equiped_chatgpt(update,context):
+    global chatgpt
+    reply_message=chatgpt.submit(update.message.text)
+    logging.info("Update:"+str(update))
+    logging.info("context:"+str(context))
+    context.bot.send_message(chat_id=update.effective_chat.id,text=reply_message)
+
+#define the function echo to process the updated messages
+def echo(update,context):
+    reply_message=update.message.text.upper()
     logging.info("Update: " + str(update))
-    logging.info("context: " + str(context))
-    context.bot.send_message(chat_id=update.effective_chat.id, text= reply_message)
+    logging.info("Context: " + str(context))
+    context.bot.send_message(chat_id=update.effective_chat.id,text=reply_message)
+
+# no return value
+#Send a message when the command /help is issue.
+def help_command(update:Update,context:CallbackContext):
+    update.message.reply_text("Helping you helping you.")
 
 
-# Define a few command handlers. These usually take the two arguments update and 
-# context. Error handlers also receive the raised TelegramError object in error.
-def help_command(update: Update, context: CallbackContext) -> None:
-    """Send a message when the command /help is issued.""" 
-    update.message.reply_text('Helping you helping you. ')
-
-
-def add(update: Update, context: CallbackContext) -> None:
-    """Send a message when the command /add is issued."""
+#no return value
+#Send a message when the command /add is issue
+def add(update:Update,context:CallbackContext):
     try:
         global redis1
         logging.info(context.args[0])
-        msg = context.args[0]   # /add keyword <-- this should store the keyword
+        msg = context.args[0]
         redis1.incr(msg)
+# get(msg) may not need decode???
+        update.message.reply_text('You have said ' + msg + ' for ' + redis1.get(msg) + ' times.')
+    except(IndexError,ValueError):
+        update.message.reply_text('Usage: /add <keyword>')
 
-        update.message.reply_text( 'You have said ' + msg +  ' for ' + redis1.get(msg).decode('UTF-8 ') + ' times. ')
+#define /hello <name> , no return value
+def hello_name(update:Update,context:CallbackContext):
+    try:
+        global redis1
+        logging.info(context.args[0])
+        msg = context.args[0]
+        redis1.incr(msg)
+        update.message.reply_text('Good day , '+msg+' !')
+    except(IndexError,ValueError):
+        update.message.reply_text('Usage: /hello <your name>')
 
-    except (IndexError, ValueError):
-        update.message.reply_text('Usage: /add <keyword> ')
 
 
-if __name__ == '__main__':
+if __name__=='__main__':
     main()
+
